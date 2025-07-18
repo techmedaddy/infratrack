@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  labels:
+    app: infratrack-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infratrack-backend
+  template:
+    metadata:
+      labels:
+        app: infratrack-backend
+    spec:
+      containers:
+      - name: infratrack-backend
+        image: kubeumar/infratrack-backend:latest
+        ports:
+        - containerPort: 8000
+        resources:
+          limits:
+            memory: "256Mi"
+            cpu: "500m"
+        env:
+        - name: AGENT_DATA_DIR
+          value: "/app/agent_data"
+        volumeMounts:
+        - name: agent-data
+          mountPath: /app/agent_data
+      volumes:
+      - name: agent-data
+        emptyDir: {}
