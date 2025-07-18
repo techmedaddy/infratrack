@@ -308,6 +308,15 @@
             margin-top: 15px;
         }
 
+        .success-message {
+            background-color: #112a11;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+
         /* Responsive Design */
         @media (max-width: 768px) {
             .container {
@@ -387,7 +396,7 @@
             <div class="deploy-info">
                 <h3>Webhook Configuration</h3>
                 <ul>
-                    <li>Webhook URL: <code>http://your-server.com/deploy</code></li>
+                    <li>Webhook URL: <code>http://localhost:8000/deploy</code></li>
                     <li>Content type: <code>application/json</code></li>
                     <li>Events: <code>push</code> to main branch</li>
                     <li>Secret: Configure in environment variables</li>
@@ -412,8 +421,8 @@
 
     <script>
         // Configuration
-        const API_BASE = '';
-        const REFRESH_INTERVAL = 30000; // 30 seconds
+        const API_BASE = 'http://localhost:8000';
+        const REFRESH_INTERVAL = 5000; // 5 seconds for testing
 
         // DOM Elements
         const uploadArea = document.getElementById('uploadArea');
@@ -464,6 +473,13 @@
         }
 
         /**
+         * Show success message
+         */
+        function showSuccess(element, message) {
+            element.innerHTML = `<div class="success-message">${message}</div>`;
+        }
+
+        /**
          * Handle file selection
          */
         function handleFileSelect(file) {
@@ -489,7 +505,7 @@
                 const formData = new FormData();
                 formData.append('file', selectedFile);
 
-                const response = await fetch('/upload-log', {
+                const response = await fetch(`${API_BASE}/upload-log`, {
                     method: 'POST',
                     body: formData
                 });
@@ -499,7 +515,13 @@
                 }
 
                 const result = await response.text();
-                uploadStatus.innerHTML = `<div class="status-online">✓ Upload successful: ${result}</div>`;
+                showSuccess(uploadStatus, `✓ Upload successful: ${result}`);
+                
+                // Clear file selection
+                selectedFile = null;
+                fileInput.value = '';
+                fileInfo.style.display = 'none';
+                uploadBtn.disabled = true;
                 
                 // Refresh logs after upload
                 setTimeout(fetchLogs, 1000);
@@ -517,7 +539,7 @@
          */
         async function fetchMetrics() {
             try {
-                const response = await fetch('/metrics');
+                const response = await fetch(`${API_BASE}/latest-stats`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -525,26 +547,43 @@
 
                 const data = await response.json();
                 
+                // Check if we have actual stats or just a message
+                if (data.message) {
+                    metricsOutput.innerHTML = `<div class="log-info">${data.message}</div>`;
+                    cpuValue.textContent = '--';
+                    ramValue.textContent = '--';
+                    diskValue.textContent = '--';
+                    statusValue.textContent = '--';
+                    statusValue.className = 'stat-value';
+                    return;
+                }
+
                 // Update stat boxes
-                cpuValue.textContent = `${data.cpu || '--'}%`;
-                ramValue.textContent = `${data.ram || '--'}%`;
-                diskValue.textContent = `${data.disk || '--'}%`;
-                statusValue.textContent = data.status || '--';
-                statusValue.className = `stat-value ${data.status === 'online' ? 'status-online' : 'status-offline'}`;
+                cpuValue.textContent = data.cpu ? `${data.cpu}%` : '--';
+                ramValue.textContent = data.memory ? `${data.memory}%` : '--';
+                diskValue.textContent = data.disk ? `${data.disk}%` : '--';
+                statusValue.textContent = data.status || 'online';
+                statusValue.className = `stat-value ${data.status === 'offline' ? 'status-offline' : 'status-online'}`;
 
                 // Update terminal output
                 const timestamp = new Date().toLocaleTimeString();
                 metricsOutput.innerHTML = `
 <span class="log-timestamp">[${timestamp}]</span> <span class="log-info">METRICS</span> System statistics updated
-<span class="log-info">CPU:</span> ${data.cpu}% | <span class="log-info">RAM:</span> ${data.ram}% | <span class="log-info">DISK:</span> ${data.disk}%
-<span class="log-info">STATUS:</span> ${data.status}
+<span class="log-info">CPU:</span> ${data.cpu || 'N/A'}% | <span class="log-info">RAM:</span> ${data.memory || 'N/A'}% | <span class="log-info">DISK:</span> ${data.disk || 'N/A'}%
+<span class="log-info">STATUS:</span> ${data.status || 'online'}
 <span class="log-info">UPTIME:</span> ${data.uptime || 'N/A'}
-<span class="log-info">LOAD:</span> ${data.load || 'N/A'}
+<span class="log-info">LOAD:</span> ${data.load_average || 'N/A'}
                 `;
 
             } catch (error) {
                 console.error('Metrics fetch error:', error);
                 showError(metricsOutput, `Failed to fetch metrics: ${error.message}`);
+                // Set default values on error
+                cpuValue.textContent = '--';
+                ramValue.textContent = '--';
+                diskValue.textContent = '--';
+                statusValue.textContent = 'offline';
+                statusValue.className = 'stat-value status-offline';
             }
         }
 
@@ -556,7 +595,7 @@
             deployBtn.disabled = true;
 
             try {
-                const response = await fetch('/deploy', {
+                const response = await fetch(`${API_BASE}/deploy`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -569,7 +608,7 @@
                 }
 
                 const result = await response.text();
-                deployStatus.innerHTML = `<div class="status-online">✓ Deployment successful: ${result}</div>`;
+                showSuccess(deployStatus, `✓ Deployment successful: ${result}`);
 
             } catch (error) {
                 console.error('Deploy error:', error);
@@ -584,9 +623,14 @@
          */
         async function fetchLogs() {
             try {
-                const response = await fetch('/logs');
+                const response = await fetch(`${API_BASE}/logs`);
                 
                 if (!response.ok) {
+                    // If logs endpoint doesn't exist, show sample logs
+                    if (response.status === 404) {
+                        logsOutput.innerHTML = generateSampleLogs();
+                        return;
+                    }
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
 
@@ -613,8 +657,38 @@
 
             } catch (error) {
                 console.error('Logs fetch error:', error);
-                showError(logsOutput, `Failed to fetch logs: ${error.message}`);
+                // Show sample logs on error
+                logsOutput.innerHTML = generateSampleLogs();
             }
+        }
+
+        /**
+         * Generate sample logs for demonstration
+         */
+        function generateSampleLogs() {
+            const timestamp = new Date().toLocaleTimeString();
+            return `
+<div class="log-line">
+    <span class="log-timestamp">[${timestamp}]</span> 
+    <span class="log-info">INFO</span> 
+    InfraTrack monitoring system started
+</div>
+<div class="log-line">
+    <span class="log-timestamp">[${timestamp}]</span> 
+    <span class="log-info">INFO</span> 
+    FastAPI server listening on http://localhost:8000
+</div>
+<div class="log-line">
+    <span class="log-timestamp">[${timestamp}]</span> 
+    <span class="log-info">INFO</span> 
+    Waiting for system metrics...
+</div>
+<div class="log-line">
+    <span class="log-timestamp">[${timestamp}]</span> 
+    <span class="log-warning">WARNING</span> 
+    No backend connection - showing demo mode
+</div>
+            `;
         }
 
         /**
